@@ -1,0 +1,25 @@
+c   This is a simple CNF formula.
+
+c
+
+c    Horn? No
+
+c    clause length = 3
+
+c
+
+p cnf 3 5
+
+1 2 3 0
+
+1 -2 3 0
+
+-1 2 3 0
+
+1 -2 -3 0
+
+-1 2 -3 0
+
+%
+
+0
