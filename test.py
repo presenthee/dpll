@@ -15,7 +15,7 @@ def test_solver():
     f.write(f"test cases in: {path}\n")
     for file in cnf_files:
       print("executing " + file)
-      output = os.popen(f"python3 solvepy3.py {path}/{file} --b vsids").read()
+      output = os.popen(f"python3 solvepy3.py {path}/{file}").read()
       # save the output to a file
       f.write(file + "\n")
       f.write(output)

@@ -18,6 +18,7 @@ class Clause:
     self.sat = sat
     self.score = score
     self.size = len(clause)
+    self.lbd = 0
 
   def __str__(self):
     return str(self.current)
@@ -31,12 +32,12 @@ class Clause:
     if self.sat:
       return
 
-    # logging.debug("update clause %s, id: %s" % (str(self.current), id(self.current)))
+    logging.debug("update clause %s, id: %s" % (str(self.current), id(self.current)))
     for var in self.current.copy():
       if abs(var) in assignment:
         self.assign(var, assignment[abs(var)][0])
-    # logging.debug("updated clause %s" % str(self.current))
-    # logging.debug("sat: %s" % self.sat)
+    logging.debug("updated clause %s" % str(self.current))
+    logging.debug("sat: %s" % self.sat)
 
   # check if the clause is unit.
   def is_unit(self):
@@ -60,8 +61,8 @@ class Clause:
       return False
 
 class Solver:
-  def __init__(self, formula, vars, n_vars, b='seq', limit=100):
-    self.assignment = {}
+  def __init__(self, formula, vars, n_vars, b='vsids', limit=100):
+    self.assignment = {} # { var: (value, level) }
     self.formula = formula
     self.learnts = set()
     self.vars = vars
@@ -79,7 +80,7 @@ class Solver:
 
   def solve(self):
     while True:
-      # logging.debug("level %d started." % self.level)
+      logging.debug("level %d started." % self.level)
       # check if the formula is solved.
       if self.is_solved():
         return True
@@ -120,8 +121,8 @@ class Solver:
       # if there is no conflict, determine a new assignment.
       else:
         var = self.decide()
-        # logging.debug("var %d selected" % var)
-        # logging.debug("var %d is set to False" % var)
+        logging.debug("var %d selected" % var)
+        logging.debug("var %d is set to False" % var)
         self.assignment[var] = (False, self.level)
         self.level += 1
 
@@ -129,7 +130,7 @@ class Solver:
     return all([ c.sat for c in self.formula.union(self.learnts) ])
 
   def unit_propagation(self):
-    # logging.debug("level %d unit propagation started." % self.level)
+    logging.debug("level %d unit propagation started." % self.level)
     while True:
       progress = False
       for c in self.formula.union(self.learnts):
@@ -141,45 +142,46 @@ class Solver:
 
         # if the clause is empty, return the clause.
         if c.is_empty():
-          # logging.debug("for clause %s" % str(c.origin))
-          # logging.debug("C is empty")
+          logging.debug("for clause %s" % str(c.origin))
+          logging.debug("C is empty")
           return c
 
         # if the clause is unit, assign the variable.
         elif c.is_unit():
-          # logging.debug("for clause %s" % str(c.origin))
-          # logging.debug("C is unit")
+          logging.debug("for clause %s" % str(c.origin))
+          logging.debug("C is unit")
           progress = True
           var = c.current.pop()
           self.stack_prop.append((var, c, self.level))
           self.assignment[abs(var)] = (var > 0, self.level)
           c.assign(var, var > 0)
-          # logging.debug("update %d to %d" % (abs(var), var > 0))
+          logging.debug("update %d to %d" % (abs(var), var > 0))
 
       if not progress:
         return None # no conflict
 
   def learn(self, conflict_c):
-    # logging.debug("level %d clause learning started." % self.level)
-    # logging.debug("conflict_c: %s" % str(conflict_c.origin))
+    logging.debug("level %d clause learning started." % self.level)
+    logging.debug("conflict_c: %s" % str(conflict_c.origin))
     learnt_set = set(conflict_c.origin)
     stack_prop = self.stack_prop.copy()
+
     while stack_prop:
       var, c, _ = stack_prop.pop()
-      # logging.debug("var: %d, c: %s" % (var, str(c.origin)))
+      logging.debug("var: %d, c: %s" % (var, str(c.origin)))
       if c != conflict_c and -var in learnt_set:
         if c.learned:
-          # logging.debug("c is learned.")
+          logging.debug("c is learned.")
           c.score += self.forget_factor
           if c.score > 1e20:
             self.scale_score()
 
-        # logging.debug("current learnt_set: %s" % str(learnt_set))
+        logging.debug("current learnt_set: %s" % str(learnt_set))
         prop_c = set(c.origin.copy())
         prop_c.remove(var)
         learnt_set.remove(-var)
         learnt_set = learnt_set.union(prop_c)
-        # logging.debug("updated learnt_set: %s" % str(learnt_set))
+        logging.debug("updated learnt_set: %s" % str(learnt_set))
 
         for var in learnt_set:
           self.score[abs(var)] += 1
@@ -187,13 +189,19 @@ class Solver:
     return learnt_set
 
   def backtrack(self, learnt_c, is_restart=False):
-    # logging.debug("level %d backtracking started." % self.level)
+    logging.debug("level %d backtracking started." % self.level)
     # find max level of vars in learnt_c
     if not is_restart:
+      lbd = set()
       max_level = 0
       for var in learnt_c.origin:
         if abs(var) in self.assignment:
-          max_level = max(max_level, self.assignment[abs(var)][1])
+          level = self.assignment[abs(var)][1]
+          max_level = max(max_level, level)
+          lbd.add(level)
+
+      # calculate LBD of the learnt clause.
+      learnt_c.lbd = sum(lbd)
 
       # remove assignments with level >= max_level
       for var, (_, level) in self.assignment.copy().items():
@@ -222,9 +230,9 @@ class Solver:
       self.forget_factor *= 1e-20
 
   def forget(self):
-    # logging.debug("level %d forgetting..." % self.level)
+    logging.debug("level %d forgetting..." % self.level)
     # sort the learnt clauses by score in descending order.
-    learnts = sorted(self.learnts, key=lambda x: x.score, reverse=True)
+    learnts = sorted(self.learnts, key=lambda x: x.lbd, reverse=True)
     num_learnts = len(learnts)
     threshold = self.forget_factor / num_learnts
 
@@ -236,12 +244,12 @@ class Solver:
         i += 1
 
   def restart(self):
-    # logging.debug("level %d restarting..." % self.level)
+    logging.debug("level %d restarting..." % self.level)
     self.backtrack(None, is_restart=True)
     self.learnt_limit *= self.limit_inc
 
   def decide(self):
-    # logging.debug("level %d deciding..." % self.level)
+    logging.debug("level %d deciding..." % self.level)
     if self.heuristic == 'seq':
       return self.decide_seq()
     elif self.heuristic == 'random':
@@ -284,6 +292,7 @@ def parse_input(f):
 
   if len(lines) == 0:
     logging.error("Invalid input file format: Empty file")
+    print("Invalid input file format: Empty file")
     exit(1)
 
   if lines[0].startswith('p'):
@@ -292,10 +301,11 @@ def parse_input(f):
     n_clauses = int(n_clauses)
   else:
     logging.error("Invalid input file format: First line should start with 'p'")
+    print("Invalid input file format: First line should start with 'p'")
     exit(1)
 
-  # logging.debug("Number of variables: %s" % n_vars)
-  # logging.debug("Number of clauses: %s" % n_clauses)
+  logging.debug("Number of variables: %s" % n_vars)
+  logging.debug("Number of clauses: %s" % n_clauses)
 
   clauses = set()
   vars = set()
@@ -311,19 +321,16 @@ def parse_input(f):
 
 # Main function of SAT solver.
 def main():
-  time_start = time.time()
-  logger = logging.getLogger(__name__)
-
   logging.basicConfig(
     level=logging.DEBUG,
     format='[%(levelname)s] %(message)s',
     filename='debug.log',
   )
-  # logging.debug("Main function started.")
+  logging.debug("Main function started.")
 
   # parse the input file.
   clauses, vars, n_vars = parse_input(arg.fname)
-  # logging.debug("Parsed variables: %s" % vars)
+  logging.debug("Parsed variables: %s" % vars)
 
   # create a solver object and solve the problem.
   solver = Solver(clauses, vars, n_vars, b=arg.b)
@@ -333,8 +340,6 @@ def main():
 
   else:
     print("s UNSATISFIABLE")
-
-  print("execution time: %f" % (time.time() - time_start))
 
 if __name__ == '__main__':
   main()
