@@ -17,6 +17,7 @@ class Clause:
     self.learned = learned
     self.sat = sat
     self.score = score
+    self.size = len(clause)
 
   def __str__(self):
     return str(self.current)
@@ -90,6 +91,7 @@ class Solver:
       if conflict_c is not None:
         # decay scores
         self.score = self.score * 0.95
+        self.forget_factor *= 1.01
 
         # clause learning
         learnt_set = self.learn(conflict_c)
@@ -98,7 +100,7 @@ class Solver:
         if not learnt_set:
           return False
 
-        learnt_c = Clause(frozenset(learnt_set), learned=True, score=1)
+        learnt_c = Clause(frozenset(learnt_set), learned=True, score=self.forget_factor)
 
         # add the learnt clause to the formula and backtrack.
         self.learnts.add(learnt_c)
@@ -168,7 +170,9 @@ class Solver:
       if c != conflict_c and -var in learnt_set:
         if c.learned:
           # logging.debug("c is learned.")
-          c.score += 1
+          c.score += self.forget_factor
+          if c.score > 1e20:
+            self.scale_score()
 
         # logging.debug("current learnt_set: %s" % str(learnt_set))
         prop_c = set(c.origin.copy())
@@ -212,12 +216,24 @@ class Solver:
     for c in self.formula.union(self.learnts):
       c.reset()
 
+  def scale_score(self):
+    for l in self.learnts:
+      l.score *= 1e-20
+      self.forget_factor *= 1e-20
+
   def forget(self):
     # logging.debug("level %d forgetting..." % self.level)
     # sort the learnt clauses by score in descending order.
     learnts = sorted(self.learnts, key=lambda x: x.score, reverse=True)
-    # remove half of the learnt clauses
-    self.learnts = set(learnts[:len(learnts) // 2])
+    num_learnts = len(learnts)
+    threshold = self.forget_factor / num_learnts
+
+    # remove half and the clause with activity less than threshold
+    i = 0
+    for l in learnts:
+      if (i < num_learnts / 2 or l.score < threshold) and l.size > 2 :
+        self.learnts.remove(l)
+        i += 1
 
   def restart(self):
     # logging.debug("level %d restarting..." % self.level)
